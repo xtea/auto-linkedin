@@ -31,16 +31,18 @@ Personal-feed posting is intentionally out of scope for v1. Every publish call p
 One command with [pipx](https://pipx.pypa.io/) (recommended):
 
 ```bash
-pipx install auto-linkedin
+pipx install auto-li
 auto-li init --account demo
 ```
 
 Or with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install auto-linkedin
+uv tool install auto-li
 auto-li init --account demo
 ```
+
+> Note: the GitHub repo is `auto-linkedin` but the PyPI distribution is published as `auto-li` (matches the CLI command). PyPI rejected `auto-linkedin` as too similar to existing LinkedIn-named packages.
 
 `auto-li init` installs the patched Chrome channel Patchright needs and scaffolds a working directory in `.`:
 

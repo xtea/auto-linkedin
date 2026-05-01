@@ -16,7 +16,7 @@ company_pages:
 default_company_page: 111873058
 
 # Browser engine. Options: patchright (default, Chromium) | camoufox (Firefox,
-# install with `pip install auto-linkedin[camoufox]`)
+# install with `pip install auto-li[camoufox]`)
 browser: patchright
 
 # IMPORTANT: match these to the browser you exported cookies from,

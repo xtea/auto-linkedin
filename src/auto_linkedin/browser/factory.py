@@ -91,7 +91,7 @@ async def _camoufox_context(
         from camoufox.async_api import AsyncCamoufox
     except ImportError as e:
         raise ImportError(
-            "Camoufox is not installed. Install with: pip install 'auto-linkedin[camoufox]'"
+            "Camoufox is not installed. Install with: pip install 'auto-li[camoufox]'"
         ) from e
 
     launch_kw: dict[str, object] = {
