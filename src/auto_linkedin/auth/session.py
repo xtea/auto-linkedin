@@ -41,15 +41,21 @@ async def is_logged_in(page: Page) -> bool:
 
     We hit `/feed/` (not the company admin URL) because the feed is the
     cheapest authenticated surface and avoids permission-related noise.
-    Authenticated landing has the global nav (Home, Network, Jobs...) visible.
-    Unauthenticated landing redirects to /login or /uas/login.
+    Unauthenticated landing redirects to /login, /uas/login, or the bare
+    homepage; the page title in those states never contains "Feed".
+
+    Two signals are checked, both required:
+      1. The final URL is on /feed/ (no challenge / login redirect).
+      2. The document title contains "Feed" — set only on the
+         authenticated feed view.
     """
     await page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
 
     current = page.url
     log.debug("current URL after navigation: %s", current)
-    # Bare /login (without authenticated /feed/) is a challenge marker. Treat /feed/ -> /login redirect as not logged in.
     if _is_challenge_url(current) or _looks_like_unauth_landing(current):
+        return False
+    if "/feed/" not in current:
         return False
 
     import asyncio as _asyncio
@@ -57,17 +63,13 @@ async def is_logged_in(page: Page) -> bool:
     await dismiss_popups(page)
 
     try:
-        # The global primary nav is only rendered on authenticated chrome.
-        await page.locator(
-            'nav[aria-label="Primary Navigation"], '
-            'a[data-test-global-nav-link="home"], '
-            'a[href="/feed/"][data-test-app-aware-link]'
-        ).first.wait_for(state="visible", timeout=15_000)
-        return True
+        title = await page.title()
     except Exception:
-        if _is_challenge_url(page.url) or _looks_like_unauth_landing(page.url):
-            return False
-        return False
+        title = ""
+    # Authenticated feed pages have titles like "Feed | LinkedIn" or
+    # "(N) Feed | LinkedIn". Unauthenticated landings are "LinkedIn",
+    # "Sign Up | LinkedIn", "LinkedIn Login", etc.
+    return "Feed" in title
 
 
 def _is_challenge_url(url: str) -> bool:

@@ -14,7 +14,10 @@ Supported post types (web UI, April 2026):
 - **image** — single image + optional caption
 - **multi_image** — 2–9 images in a single share
 - **video** — one video (MP4/MOV/WMV/FLV/AVI)
-- **article** — link share with auto-generated preview card
+- **link** — share-modal post with an auto-generated URL preview card (`/feed/update/...`)
+- **article** — long-form post via LinkedIn's article editor (`/pulse/...`), with title + body
+
+`link` and `article` are different LinkedIn surfaces with unrelated UIs and permalinks; don't confuse them. `link` is the regular share modal with a URL embedded in the text. `article` is the dashboard "Publish an article" editor, with a separate title field and a long body (up to ~110k chars).
 
 Personal-feed posting is intentionally out of scope for v1. Every publish call posts as one of the company pages listed in the account YAML.
 
@@ -129,13 +132,14 @@ content/
 ### `post.yaml` schema
 
 ```yaml
-type: image                     # text | image | multi_image | video | article
+type: image                     # text | image | multi_image | video | link | article
 caption: |
   Excited to announce ...
 media:
   - ./media/launch.jpg          # paths are relative to this file
 as_company: 111873058           # optional; falls back to default_company_page
-article_url: null               # required only for type=article (HTTPS)
+link_url: null                  # required only for type=link (HTTPS)
+title: null                     # required only for type=article (≤ 150 chars)
 schedule: 2026-05-08T15:00:00Z  # optional; UTC or with offset
 ```
 
@@ -143,12 +147,13 @@ Validation runs before any browser work:
 
 | Type | Rule |
 |---|---|
-| `text` | non-empty caption, no media, no article_url |
+| `text` | non-empty caption, no media, no link_url, no title |
 | `image` | exactly 1 image (.jpg / .jpeg / .png / .gif) |
 | `multi_image` | 2–9 images |
 | `video` | exactly 1 video (.mp4 / .mov / .wmv / .flv / .avi) |
-| `article` | HTTPS `article_url`, no media |
-| caption | ≤ 3000 chars, ≤ 30 hashtags |
+| `link` | HTTPS `link_url`, no media |
+| `article` | non-empty `title` (≤ 150 chars) + non-empty body in `caption` (≤ 110k chars), no media, no link_url |
+| caption (non-article) | ≤ 3000 chars, ≤ 30 hashtags |
 
 ### One-shot publish
 
@@ -178,10 +183,19 @@ The queue stores state in `sessions/queue.db` (SQLite) with statuses: `queued | 
 
 1. Launch Chrome via [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) (Chromium with CDP/webdriver leaks patched at the binary level). Vanilla `playwright` is fingerprinted by LinkedIn's bot-detection stack in 2026 — don't use it.
 2. Load `sessions/<account>.json` as the Playwright `storage_state`.
-3. Navigate to `https://www.linkedin.com/feed/`, confirm the global nav is visible (signal of authenticated state).
-4. Open the share modal from `https://www.linkedin.com/company/<page_id>/admin/page-posts/published/`. This URL auto-scopes the actor to the company — no actor-switcher driving required. The visible "Posting as <Company>" pill is verified before any caption / media work.
-5. Type the caption (with humanized per-character delay), then `setInputFiles` into the hidden `<input type=file>` for image / multi_image / video posts. For article posts, the URL is included in the typed text so LinkedIn's auto-preview card renders.
-6. Click **Post**. Wait for the success toast and confirm via URN delta on the admin grid.
+3. Navigate to `https://www.linkedin.com/feed/`, confirm by URL + page title that the session is authenticated.
+
+For **share-modal posts** (text / image / multi_image / video / link):
+
+4. Open the share modal from `https://www.linkedin.com/company/<page_id>/admin/page-posts/published/`. This URL auto-scopes the actor to the company — no actor-switcher driving required. The visible "Posting as &lt;Company&gt;" pill is verified before any caption / media work.
+5. Type the caption (with humanized per-character delay), then `setInputFiles` into the hidden `<input type=file>` for image / multi_image / video posts. For `link` posts, the URL is included in the typed text so LinkedIn's auto-preview card renders.
+6. Click **Post**. Confirm via URN delta on the admin grid (`urn:li:activity:...`).
+
+For **`article`** (long-form):
+
+4. Open the editor directly at `https://www.linkedin.com/article/new?author=urn:li:fsd_company:<page_id>`. The `author=` URN locks the actor to the company; no Create-menu interaction is required.
+5. Verify the company name is reachable in the editor toolbar. Fill the title (`<textarea>`) and body (Quill contenteditable).
+6. Click **Next** → **Publish** in the modal. Confirm by URL transition to `/pulse/<slug>-<id>/`.
 
 All selectors are in [`src/auto_linkedin/publisher/selectors.py`](src/auto_linkedin/publisher/selectors.py) — when LinkedIn changes the UI, that is the file to patch.
 
@@ -206,7 +220,7 @@ If the share modal opens with the wrong actor (admin permissions on the page hav
 
 - **Company pages only in v1.** Personal-feed posts are out of scope.
 - **No `@mention` typeahead.** Mentions in the caption are passed through as plain text — driving LinkedIn's mention picker is a follow-up.
-- **No native scheduler.** Schedules are managed via the local SQLite queue + cron; we don't drive LinkedIn's "Schedule for later" bottom-sheet.
+- **No native scheduler.** Schedules are managed via the local SQLite queue + cron; we don't drive LinkedIn's "Schedule for later" UI (which exists for both share posts and articles).
 - **Selectors rot.** LinkedIn ships UI changes every few weeks. Expect periodic patches to `selectors.py`.
 - **2FA mid-run.** If LinkedIn challenges mid-publish, the tool pauses; manual re-login is required.
 - **Shared IP.** Using cookies captured from residence A while running the bot on residence B's IP is the single most reliable way to get challenged.

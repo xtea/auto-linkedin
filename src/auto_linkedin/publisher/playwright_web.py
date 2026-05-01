@@ -103,6 +103,20 @@ class PlaywrightWebPublisher:
                 )
             await dismiss_popups(page)
 
+            # Articles use a fully separate editor surface (different URL,
+            # different selectors, different success signal). Dispatch on type.
+            if post.type == PostType.ARTICLE:
+                await _pre_run_idle(page, self._pacing)
+                try:
+                    return await self._run_article_flow(
+                        page, post, target_page=target_page, dry_run=dry_run
+                    )
+                except (ChallengeRequiredError, WrongActorError):
+                    raise
+                except Exception as e:
+                    await detect_challenge(page)
+                    raise RuntimeError(f"Article publish failed: {e}") from e
+
             pre_urn = await self._dedup_guard(ctx, target_page, post, force=force)
             if pre_urn is _ALREADY_PUBLISHED:
                 urn = self._last_seen_urn
@@ -195,15 +209,15 @@ class PlaywrightWebPublisher:
         # surface — abort instead.
         await _verify_actor(modal, target_page)
 
-        # Caption first. LinkedIn's behaviour for article posts is to detect a
-        # pasted URL inside the editor, so the order matters: type the URL
-        # before any media is set.
-        if post.type == PostType.ARTICLE:
-            assert post.article_url is not None  # validated upstream
-            article_text = (post.caption + ("\n\n" if post.caption else "") + str(post.article_url)).strip()
-            await _fill_caption(modal, article_text)
+        # Caption first. For LINK posts, LinkedIn auto-detects a pasted URL
+        # inside the editor and renders a preview card — so the URL goes
+        # into the editor text, not as a separate attachment.
+        if post.type == PostType.LINK:
+            assert post.link_url is not None  # validated upstream
+            link_text = (post.caption + ("\n\n" if post.caption else "") + str(post.link_url)).strip()
+            await _fill_caption(modal, link_text)
             await _humanize_delay(self._pacing)
-            await _wait_for_article_preview(modal)
+            await _wait_for_link_preview(modal)
         else:
             await _fill_caption(modal, post.caption)
             await _humanize_delay(self._pacing)
@@ -244,6 +258,145 @@ class PlaywrightWebPublisher:
         )
         url = sel.feed_update_url(urn) if urn else None
         return PublishResult(ok=True, shortcode=urn, url=url)
+
+    async def _run_article_flow(
+        self,
+        page: Page,
+        post: Post,
+        *,
+        target_page: CompanyPage,
+        dry_run: bool,
+    ) -> PublishResult:
+        """Drive the dashboard article editor for a long-form post.
+
+        Flow:
+          1. goto /article/new?author=urn:li:fsd_company:<id>
+          2. Verify the company name is present in the editor toolbar
+             (actor pill check — different shape than the share modal).
+          3. Fill the title <textarea> and the body contenteditable.
+          4. Click Next → opens the publish modal.
+          5. Click Publish in the modal.
+          6. Confirm by URL transition to /pulse/<slug-id>/.
+
+        The pulse permalink itself is recorded as both `shortcode` (the
+        slug-id portion) and `url` (the full permalink) on the result.
+        """
+        assert post.title is not None  # validated upstream
+        await page.goto(sel.article_editor_url(target_page.id), wait_until="domcontentloaded")
+        await asyncio.sleep(5.0)
+        title = await page.title()
+        if "Publish new article" not in title:
+            raise RuntimeError(
+                f"Article editor did not load (title={title!r}, url={page.url})"
+            )
+
+        # Actor pill check — articles don't render the same modal pill as the
+        # share box; we verify the company name is reachable somewhere in
+        # the editor toolbar buttons.
+        actor_visible = await page.evaluate(
+            "(expected) => Array.from(document.querySelectorAll('button')).some("
+            "b => (b.textContent || '').trim().includes(expected))",
+            target_page.display_name,
+        )
+        if not actor_visible:
+            raise WrongActorError(
+                f"Article editor toolbar does not show '{target_page.display_name}'. "
+                "Admin permissions on the page may have lapsed; re-check on linkedin.com."
+            )
+        log.info("Actor verified in article editor toolbar: %s", target_page.display_name)
+
+        # Title (textarea — use fill, not type, since textarea can swallow keystrokes).
+        title_box = page.locator(sel.ARTICLE_TITLE_TEXTAREA).first
+        await title_box.wait_for(state="visible", timeout=10_000)
+        await title_box.click()
+        await title_box.fill(post.title)
+        await _humanize_delay(self._pacing)
+
+        # Body — contenteditable, type with realistic delay so LinkedIn's
+        # editor doesn't drop characters.
+        body_loc = None
+        for css in sel.ARTICLE_BODY_EDITOR_ALTERNATIVES:
+            loc = page.locator(css).first
+            try:
+                await loc.wait_for(state="visible", timeout=4_000)
+                body_loc = loc
+                break
+            except Exception:
+                continue
+        if body_loc is None:
+            raise TimeoutError("Article body editor not found.")
+
+        await body_loc.click()
+        # Type the body. Paragraph breaks in the source caption become
+        # double-Enter sequences in the editor.
+        paragraphs = post.caption.split("\n\n")
+        for i, para in enumerate(paragraphs):
+            if para:
+                await page.keyboard.type(para, delay=random.randint(15, 30))
+            if i < len(paragraphs) - 1:
+                await page.keyboard.press("Enter")
+                await page.keyboard.press("Enter")
+        await _humanize_delay(self._pacing)
+
+        # Sanity check that content actually populated.
+        actual_title = await title_box.input_value()
+        body_chars = await body_loc.evaluate("e => (e.textContent || '').length")
+        if actual_title != post.title or body_chars < min(50, len(post.caption)):
+            raise RuntimeError(
+                f"Article content did not populate (title={actual_title!r}, "
+                f"body_chars={body_chars})"
+            )
+
+        if dry_run:
+            log.warning("Dry-run: reached Next button but NOT clicking. Aborting.")
+            return PublishResult(ok=True, dry_run=True)
+
+        # Step 4: Next → publish modal.
+        next_btn = page.get_by_role("button", name=sel.ARTICLE_NEXT_BUTTON_TEXT).first
+        await next_btn.wait_for(state="visible", timeout=10_000)
+        await asyncio.sleep(2.0)
+        await next_btn.click()
+        await asyncio.sleep(3.0)
+
+        # Step 5: Publish inside the modal.
+        publish_btn = None
+        for css in sel.ARTICLE_PUBLISH_BUTTON_ALTERNATIVES:
+            loc = page.locator(css).first
+            try:
+                await loc.wait_for(state="visible", timeout=8_000)
+                publish_btn = loc
+                break
+            except Exception:
+                continue
+        if publish_btn is None:
+            raise TimeoutError("Publish button not found in article confirmation modal.")
+
+        # Mouse jitter before the commit click.
+        try:
+            vp = self.account.viewport
+            x = random.randint(int(vp.width * 0.4), int(vp.width * 0.6))
+            y = random.randint(int(vp.height * 0.4), int(vp.height * 0.6))
+            await page.mouse.move(x, y, steps=10)
+        except Exception:
+            pass
+
+        log.info("Clicking Publish (article)...")
+        await publish_btn.click()
+
+        # Step 6: confirm via URL transition to /pulse/.
+        end_at = asyncio.get_event_loop().time() + 90.0
+        while asyncio.get_event_loop().time() < end_at:
+            url = page.url
+            if sel.ARTICLE_PUBLISHED_URL_FRAGMENT in url:
+                log.info("Article published: %s", url)
+                # Extract the slug-id segment as the shortcode (everything
+                # between /pulse/ and the trailing slash).
+                slug_id = url.split("/pulse/", 1)[1].rstrip("/").split("/")[0].split("?", 1)[0]
+                return PublishResult(ok=True, shortcode=slug_id, url=url.split("?", 1)[0])
+            await asyncio.sleep(2.0)
+        raise TimeoutError(
+            f"Article publish confirmation did not arrive (final url={page.url})."
+        )
 
 
 # ---------- helpers ----------
@@ -401,17 +554,17 @@ async def _wait_for_uploads_done(modal: Locator, *, timeout_ms: int) -> None:
     raise TimeoutError("Media upload did not finish within the deadline.")
 
 
-async def _wait_for_article_preview(modal: Locator, *, timeout_ms: int = 30_000) -> None:
+async def _wait_for_link_preview(modal: Locator, *, timeout_ms: int = 30_000) -> None:
     end_at = asyncio.get_event_loop().time() + timeout_ms / 1000
     while asyncio.get_event_loop().time() < end_at:
-        for css in sel.ARTICLE_PREVIEW_CARD_ALTERNATIVES:
+        for css in sel.LINK_PREVIEW_CARD_ALTERNATIVES:
             try:
                 if await modal.locator(css).first.is_visible(timeout=500):
                     return
             except Exception:
                 continue
         await asyncio.sleep(1.0)
-    raise TimeoutError("Article preview card did not render within the deadline.")
+    raise TimeoutError("Link preview card did not render within the deadline.")
 
 
 async def _click_post_button(modal: Locator) -> None:

@@ -1,8 +1,8 @@
-# type: text | image | multi_image | video | article
+# type: text | image | multi_image | video | link | article
 type: text
 
 caption: |
-  Hello from auto-linkedin. Excited to share what we have been working on.
+  Hello from auto-li. Excited to share what we have been working on.
 
 # Optional. Required for type=image (1 file), multi_image (2-9), video (1).
 # Paths are relative to this post.yaml. Put your media in ./media/.
@@ -11,8 +11,14 @@ media: []
 # Optional. Falls back to account YAML's `default_company_page` if omitted.
 # as_company: 111873058
 
-# Required only for type=article — must be HTTPS.
-# article_url: "https://example.com/blog/launch"
+# Required only for type=link — must be HTTPS.
+# link_url: "https://example.com/blog/launch"
+
+# Required only for type=article (long-form). Caps at 150 chars.
+# title: "My company's announcement"
+
+# For type=article, the long-form body goes in `caption` above (cap 110_000).
+# Separate paragraphs with a blank line.
 
 # Optional — omit for immediate publish. Use ISO-8601 (UTC or with offset).
 # schedule: 2026-05-08T15:00:00Z

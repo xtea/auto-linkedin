@@ -27,6 +27,15 @@ def feed_update_url(urn: str) -> str:
     return f"https://www.linkedin.com/feed/update/{urn}/"
 
 
+def article_editor_url(page_id: int) -> str:
+    """Direct deep-link to the long-form article editor scoped to a company.
+
+    The `author=` URN locks the actor to the company; no Create-menu
+    interaction is required.
+    """
+    return f"https://www.linkedin.com/article/new?author=urn:li:fsd_company:{page_id}"
+
+
 # ---- Top-level "Start a post" trigger on the admin page-posts view ----
 START_A_POST_BUTTON_ALTERNATIVES = (
     'button[aria-label*="Start a post"]',
@@ -91,8 +100,9 @@ UPLOAD_PROGRESS_ALTERNATIVES = (
     'div[role="dialog"] progress',
 )
 
-# Article preview card: rendered ~2 s after the URL appears in the editor.
-ARTICLE_PREVIEW_CARD_ALTERNATIVES = (
+# Link preview card: rendered ~2 s after the URL appears in the share-modal
+# editor. Only used for PostType.LINK (separate from long-form ARTICLE).
+LINK_PREVIEW_CARD_ALTERNATIVES = (
     'div[data-test-share-content-link-preview]',
     'div[role="dialog"] article[data-test-share-link-preview]',
     'div[role="dialog"] a[data-test-share-link-preview]',
@@ -131,3 +141,31 @@ POST_BODY_TEXT_ALTERNATIVES = (
     '[data-test-update-text]',
     'div.update-components-text',
 )
+
+
+# ====================================================================
+# Long-form article editor (separate UI from the share modal)
+# ====================================================================
+
+# The headline is a real <textarea>, not a contenteditable. maxlength=150.
+ARTICLE_TITLE_TEXTAREA = "textarea#article-editor-headline__textarea"
+
+# Article body is a Quill-style contenteditable.
+ARTICLE_BODY_EDITOR_ALTERNATIVES = (
+    'div[contenteditable="true"][aria-label="Article editor content"]',
+    'div[contenteditable="true"][aria-label*="Article editor"]',
+    'div[contenteditable="true"][aria-label*="Article"]',
+)
+
+# Pre-publish "Next" button in the editor toolbar (opens the publish modal).
+ARTICLE_NEXT_BUTTON_TEXT = "Next"
+
+# Final Publish button inside the post-Next modal.
+ARTICLE_PUBLISH_BUTTON_ALTERNATIVES = (
+    '[role="dialog"] button:has-text("Publish")',
+    '[role="dialog"] button[aria-label*="Publish"]',
+)
+
+# After publish, the page navigates to /pulse/<slug>-<id>/?published=t
+# Pattern used to assert success.
+ARTICLE_PUBLISHED_URL_FRAGMENT = "/pulse/"

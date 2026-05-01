@@ -37,7 +37,8 @@ def test_load_text_post(tmp_path: Path) -> None:
     assert post.type == PostType.TEXT
     assert post.media == []
     assert post.caption == "hello world #x"
-    assert post.article_url is None
+    assert post.link_url is None
+    assert post.title is None
 
 
 def test_text_post_requires_caption(tmp_path: Path) -> None:
@@ -171,40 +172,107 @@ def test_video_requires_one_file(tmp_path: Path) -> None:
         load_post(post_dir)
 
 
-# ---- article ----
+# ---- link (share-modal post with URL preview card) ----
 
 
-def test_article_requires_url(tmp_path: Path) -> None:
-    post_dir = _write_post(tmp_path, body={"type": "article", "caption": "read this"})
-    with pytest.raises(Exception, match="article_url"):
+def test_link_requires_url(tmp_path: Path) -> None:
+    post_dir = _write_post(tmp_path, body={"type": "link", "caption": "read this"})
+    with pytest.raises(Exception, match="link_url"):
         load_post(post_dir)
 
 
-def test_article_accepts_https_url(tmp_path: Path) -> None:
+def test_link_accepts_https_url(tmp_path: Path) -> None:
     post_dir = _write_post(
         tmp_path,
         body={
-            "type": "article",
+            "type": "link",
             "caption": "read this",
-            "article_url": "https://example.com/blog/x",
+            "link_url": "https://example.com/blog/x",
         },
     )
     post = load_post(post_dir)
-    assert post.type == PostType.ARTICLE
-    assert str(post.article_url).startswith("https://")
+    assert post.type == PostType.LINK
+    assert str(post.link_url).startswith("https://")
 
 
-def test_article_rejects_http_url(tmp_path: Path) -> None:
+def test_link_rejects_http_url(tmp_path: Path) -> None:
     post_dir = _write_post(
         tmp_path,
         body={
-            "type": "article",
+            "type": "link",
             "caption": "read this",
-            "article_url": "http://example.com/blog/x",
+            "link_url": "http://example.com/blog/x",
         },
     )
     with pytest.raises(Exception, match="HTTPS"):
         load_post(post_dir)
+
+
+def test_link_rejects_media(tmp_path: Path) -> None:
+    post_dir = _write_post(
+        tmp_path,
+        body={
+            "type": "link",
+            "caption": "read this",
+            "link_url": "https://example.com/blog/x",
+            "media": ["./media/a.jpg"],
+        },
+        media_files=[("a.jpg", b"\xff\xd8\xff")],
+    )
+    with pytest.raises(Exception, match="must not include media"):
+        load_post(post_dir)
+
+
+# ---- article (long-form via dashboard editor) ----
+
+
+def test_article_requires_title(tmp_path: Path) -> None:
+    post_dir = _write_post(
+        tmp_path, body={"type": "article", "caption": "Body of the article."}
+    )
+    with pytest.raises(Exception, match="non-empty title"):
+        load_post(post_dir)
+
+
+def test_article_requires_body(tmp_path: Path) -> None:
+    post_dir = _write_post(
+        tmp_path, body={"type": "article", "title": "My Article"}
+    )
+    with pytest.raises(Exception, match="non-empty body"):
+        load_post(post_dir)
+
+
+def test_article_accepts_title_and_body(tmp_path: Path) -> None:
+    post_dir = _write_post(
+        tmp_path,
+        body={
+            "type": "article",
+            "title": "My Article",
+            "caption": "First paragraph.\n\nSecond paragraph.",
+        },
+    )
+    post = load_post(post_dir)
+    assert post.type == PostType.ARTICLE
+    assert post.title == "My Article"
+    assert "Second paragraph" in post.caption
+
+
+def test_article_title_max_chars(tmp_path: Path) -> None:
+    post_dir = _write_post(
+        tmp_path,
+        body={"type": "article", "title": "x" * 151, "caption": "body"},
+    )
+    with pytest.raises(Exception, match="article titles cap at 150"):
+        load_post(post_dir)
+
+
+def test_article_body_can_be_long(tmp_path: Path) -> None:
+    post_dir = _write_post(
+        tmp_path,
+        body={"type": "article", "title": "T", "caption": "x" * 50_000},
+    )
+    post = load_post(post_dir)
+    assert len(post.caption) == 50_000
 
 
 def test_article_rejects_media(tmp_path: Path) -> None:
@@ -212,13 +280,27 @@ def test_article_rejects_media(tmp_path: Path) -> None:
         tmp_path,
         body={
             "type": "article",
-            "caption": "read this",
-            "article_url": "https://example.com/blog/x",
+            "title": "My Article",
+            "caption": "Body",
             "media": ["./media/a.jpg"],
         },
         media_files=[("a.jpg", b"\xff\xd8\xff")],
     )
     with pytest.raises(Exception, match="must not include media"):
+        load_post(post_dir)
+
+
+def test_article_rejects_link_url(tmp_path: Path) -> None:
+    post_dir = _write_post(
+        tmp_path,
+        body={
+            "type": "article",
+            "title": "T",
+            "caption": "Body",
+            "link_url": "https://example.com",
+        },
+    )
+    with pytest.raises(Exception, match="must not set link_url"):
         load_post(post_dir)
 
 
@@ -239,7 +321,7 @@ def test_caption_over_max_rejected(tmp_path: Path) -> None:
         tmp_path,
         body={"type": "text", "caption": "x" * (CAPTION_MAX_CHARS + 1)},
     )
-    with pytest.raises(Exception, match="caps captions"):
+    with pytest.raises(Exception, match="cap is"):
         load_post(post_dir)
 
 
