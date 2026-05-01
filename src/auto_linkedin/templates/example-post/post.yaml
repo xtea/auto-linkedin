@@ -1,0 +1,18 @@
+# type: text | image | multi_image | video | article
+type: text
+
+caption: |
+  Hello from auto-linkedin. Excited to share what we have been working on.
+
+# Optional. Required for type=image (1 file), multi_image (2-9), video (1).
+# Paths are relative to this post.yaml. Put your media in ./media/.
+media: []
+
+# Optional. Falls back to account YAML's `default_company_page` if omitted.
+# as_company: 111873058
+
+# Required only for type=article — must be HTTPS.
+# article_url: "https://example.com/blog/launch"
+
+# Optional — omit for immediate publish. Use ISO-8601 (UTC or with offset).
+# schedule: 2026-05-08T15:00:00Z

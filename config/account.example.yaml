@@ -1,0 +1,46 @@
+# Copy this file to config/<account-name>.yaml and fill in.
+# The `<account-name>` is what you pass to --account on the CLI.
+
+# Required: your personal LinkedIn handle (display only).
+handle: your_linkedin_handle
+
+# Company pages this account is admin of. At least one entry is required —
+# v1 posts only as a company page. The numeric `id` is from the admin URL:
+#   https://www.linkedin.com/company/<id>/admin/dashboard/
+company_pages:
+  - id: 111873058
+    slug: my-company
+    display_name: "My Company"
+
+# Optional. Used when post.yaml omits `as_company` and --as is not passed.
+default_company_page: 111873058
+
+# Browser engine. Options: patchright (default, Chromium) | camoufox (Firefox,
+# install with `pip install auto-linkedin[camoufox]`)
+browser: patchright
+
+# IMPORTANT: match these to the browser you exported cookies from,
+# or the one you'll use in `auto-li login` on your real residential IP.
+# If they drift from the cookie's origin, LinkedIn issues a /checkpoint/.
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+viewport:
+  width: 1440
+  height: 900
+locale: "en-US"
+timezone: "America/Los_Angeles"
+
+# Optional: residential proxy.
+# proxy:
+#   server: "http://user:pass@host:port"
+#   bypass: ""
+
+# Pacing — conservative for company pages.
+pacing:
+  max_posts_per_day: 2
+  min_step_delay_seconds: 30
+  max_step_delay_seconds: 180
+  pre_run_idle_seconds_min: 60
+  pre_run_idle_seconds_max: 180
+
+# Headless / headed. Keep headed=false for first runs so you can see the browser.
+headless: false
