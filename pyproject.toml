@@ -1,6 +1,6 @@
 [project]
 name = "auto-li"
-version = "0.1.0"
+version = "0.1.1"
 description = "Open-source LinkedIn company-page publisher that drives linkedin.com with Playwright and imported cookies. (CLI: auto-li)"
 readme = "README.md"
 requires-python = ">=3.11"
