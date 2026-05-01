@@ -74,7 +74,9 @@ async def _patchright_context(
         if session_file and session_file.exists():
             context_kwargs["storage_state"] = str(session_file)
 
-        context = await browser.new_context(**context_kwargs)
+        # mypy can't verify generic dict-of-object **unpack against Playwright's
+        # heavily-typed kwargs. Runtime types are correct.
+        context = await browser.new_context(**context_kwargs)  # type: ignore[arg-type]
         try:
             yield context
         finally:

@@ -233,6 +233,32 @@ If the share modal opens with the wrong actor (admin permissions on the page hav
 - Engagement automation (reactions, comments, DMs, connection requests)
 - Personal-feed posting (deferred to v2)
 
+## Release flow (maintainers)
+
+CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on every push to `main` and every PR, against Python 3.11 and 3.12.
+
+Releases are tag-driven (`.github/workflows/publish.yml`). To cut a release:
+
+```bash
+# 1. Bump version in pyproject.toml (the workflow asserts tag == pyproject version)
+$EDITOR pyproject.toml
+
+# 2. Commit, tag, push the tag.
+git commit -am "Release v0.1.1"
+git tag v0.1.1
+git push origin main v0.1.1
+```
+
+The publish workflow then:
+
+1. Verifies tag version matches `pyproject.toml`.
+2. Re-runs ruff + mypy + pytest (no red builds shipped).
+3. `uv build` → wheel + sdist.
+4. `uv publish` to PyPI using the `UV_PUBLISH_TOKEN` secret from the `default` GitHub Environment.
+5. Creates a GitHub Release with the dist artifacts attached.
+
+Manual re-publish: trigger `Publish to PyPI` from the Actions tab and pass an existing tag via `workflow_dispatch`.
+
 ## License
 
 MIT.

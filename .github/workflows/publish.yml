@@ -1,0 +1,157 @@
+name: Publish to PyPI
+
+# Triggers:
+#   - push of a `v*` tag (e.g., `v0.1.1`) → automatic release
+#   - manual dispatch from the Actions tab → emergency / re-publish
+#
+# The workflow:
+#   1. Verifies the tag matches `pyproject.toml` version (catches forgotten bumps).
+#   2. Runs the same gates as CI (ruff, mypy, pytest) — never publish a red build.
+#   3. Builds wheel + sdist via `uv build`.
+#   4. Publishes to PyPI via `uv publish`, reading `UV_PUBLISH_TOKEN` from the
+#      `default` environment's secrets.
+#   5. Creates a GitHub Release with the dist artifacts attached.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.1). Must already exist."
+        required: true
+        type: string
+
+jobs:
+  verify:
+    name: Verify version + run gates
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.versions.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Resolve tag and pyproject versions
+        id: versions
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.tag || '' }}" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([a-z0-9.+-]*)?$ ]]; then
+            echo "::error::Tag '$tag' is not a valid v<semver> tag"
+            exit 1
+          fi
+          tag_version="${tag#v}"
+          py_version=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          echo "tag=$tag"
+          echo "tag_version=$tag_version"
+          echo "py_version=$py_version"
+          if [ "$tag_version" != "$py_version" ]; then
+            echo "::error::Tag version ($tag_version) does not match pyproject.toml version ($py_version). Bump pyproject.toml before tagging."
+            exit 1
+          fi
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+
+      - name: Install dev deps
+        run: uv sync --extra dev
+
+      - name: Ruff
+        run: uv run ruff check src/ tests/
+
+      - name: Mypy
+        run: uv run mypy src/
+
+      - name: Pytest
+        run: uv run pytest tests/ -ra
+
+  build:
+    name: Build wheel + sdist
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Build
+        run: uv build
+
+      - name: List dist contents
+        run: ls -la dist/
+
+      - name: Upload dist as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
+
+  publish:
+    name: Publish to PyPI
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    # Use the `default` environment, which holds UV_PUBLISH_TOKEN as a secret.
+    # GitHub Environments also let you require manual approval if you want.
+    environment:
+      name: default
+      url: https://pypi.org/project/auto-li/${{ needs.verify.outputs.version }}/
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
+        run: uv publish dist/*
+
+  release:
+    name: Create GitHub Release
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version="${{ needs.verify.outputs.version }}"
+          gh release create "$tag" \
+            --title "v$version" \
+            --notes "Published to PyPI: https://pypi.org/project/auto-li/$version/" \
+            --verify-tag \
+            dist/*
