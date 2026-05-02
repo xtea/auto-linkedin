@@ -237,16 +237,16 @@ If the share modal opens with the wrong actor (admin permissions on the page hav
 
 CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on every push to `main` and every PR, against Python 3.11 and 3.12.
 
-Releases are tag-driven (`.github/workflows/publish.yml`). To cut a release:
+Releases are tag-driven (`.github/workflows/publish.yml`). The runtime `__version__` is read from package metadata, so `pyproject.toml` is the only version source. To cut a release:
 
 ```bash
-# 1. Bump version in pyproject.toml (the workflow asserts tag == pyproject version)
-$EDITOR pyproject.toml
+# 1. Bump pyproject.toml. Pass patch | minor | major, or an explicit X.Y.Z.
+./scripts/bump.py patch     # e.g. 0.1.1 -> 0.1.2
 
-# 2. Commit, tag, push the tag.
-git commit -am "Release v0.1.1"
-git tag v0.1.1
-git push origin main v0.1.1
+# 2. Review the printed diff, then commit + tag + push.
+git commit -am 'Release v0.1.2'
+git tag v0.1.2
+git push origin main v0.1.2
 ```
 
 The publish workflow then:
